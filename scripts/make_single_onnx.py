@@ -200,6 +200,10 @@ if __name__ == '__main__':
         wrapper,
         (left_img, right_img),
         onnx_path,
+        # This export relies on tracing and the monkey-patches above. PyTorch
+        # 2.9 defaults to the torch.export-based path, which currently cannot
+        # lower adaptive_max_pool2d used by the model.
+        dynamo=False,
         opset_version=17,
         input_names=['left_image', 'right_image'],
         output_names=['disparity'],

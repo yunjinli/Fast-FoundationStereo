@@ -138,7 +138,24 @@ Expect to see results like below:
 
 
 # ONNX/TRT
-For TRT, we recommend first setup env in docker.
+
+The Docker-free Pixi environment includes TensorRT's Python builder and runtime:
+
+```bash
+pixi install -e trt
+pixi run -e trt trt-check
+pixi run -e trt trt-export
+pixi run -e trt trt-build
+pixi run -e trt trt-demo
+pixi run -e trt trt-benchmark
+```
+
+The export and engine are written to `output_single_trt/`. The supplied tasks
+build a fixed 640x480, 8-iteration FP16 engine from checkpoint `23-36-37`.
+Change the task arguments in `pixi.toml`, or invoke the scripts directly through
+`pixi run -e trt`, to use another resolution, iteration count, or checkpoint.
+TensorRT engines are specific to the GPU and TensorRT version, so rebuild the
+engine after changing either one.
 
 ## Single ONNX
 
@@ -160,7 +177,9 @@ python scripts/make_single_onnx.py --model_dir weights/23-36-37/model_best_bp2_s
 
 Then convert to a single TRT engine:
 ```bash
-trtexec --onnx=output/fast_foundationstereo.onnx --saveEngine=output/fast_foundationstereo.engine --fp16
+pixi run -e trt python scripts/build_single_trt.py \
+  --onnx output/fast_foundationstereo.onnx \
+  --engine output/fast_foundationstereo.engine --fp16
 ```
 
 To run inference with the single ONNX or TRT engine:
