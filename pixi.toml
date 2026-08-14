@@ -1,0 +1,47 @@
+[workspace]
+name = "fast-foundation-stereo"
+version = "0.1.0"
+description = "Pixi environment for Fast-FoundationStereo inference"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[environments]
+default = { features = ["base", "local"], no-default-feature = true }
+
+[feature.base.dependencies]
+python = "==3.12.11"
+pip = "*"
+ninja = "*"
+libgl = "*"
+libglib = "*"
+libjpeg-turbo = "*"
+open3d = "*"
+numpy = ">=1.26,<2"
+
+[feature.base.pypi-dependencies]
+"scikit-image" = "*"
+omegaconf = "*"
+"opencv-contrib-python" = "*"
+timm = "*"
+scipy = "*"
+pyyaml = "*"
+imageio = "*"
+einops = "*"
+pyTurboJPEG = "*"
+
+[feature.base.tasks]
+demo-help = "python scripts/run_demo.py --help"
+run-demo = "python scripts/run_demo.py --model_dir weights/23-36-37/model_best_bp2_serialize.pth --left_file demo_data/left.png --right_file demo_data/right.png --intrinsic_file demo_data/K.txt --out_dir output/ --remove_invisible 0 --denoise_cloud 1 --scale 1 --get_pc 1 --valid_iters 8 --max_disp 192 --zfar 100"
+ros-depth = "bash -lc 'source /opt/ros/jazzy/setup.bash && python scripts/ros2_depth_node.py'"
+
+[feature.local]
+platforms = ["linux-64"]
+
+[feature.local.activation.env]
+CUDA_HOME = "/usr/local/cuda-12.8/"
+CUDA_PATH = "/usr/local/cuda-12.8/"
+OPENCV_IO_ENABLE_OPENEXR = "1"
+
+[feature.local.pypi-dependencies]
+torch = { version = "==2.9.1", index = "https://download.pytorch.org/whl/cu128" }
+torchvision = { version = "==0.24.1", index = "https://download.pytorch.org/whl/cu128" }
