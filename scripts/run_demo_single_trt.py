@@ -47,7 +47,7 @@ import os
 import sys
 
 import cv2
-import imageio
+import imageio.v2 as imageio
 import numpy as np
 import torch
 import yaml
@@ -82,6 +82,7 @@ class SingleEngineTrtRunner:
                 f'Rebuild with:  trtexec --onnx=<your .onnx> '
                 f'--saveEngine={engine_path} --fp16')
         self.context = self.engine.create_execution_context()
+        self.stream = torch.cuda.Stream()
 
     def _trt_to_torch_dtype(self, dt):
         trt = self.trt
@@ -133,8 +134,10 @@ class SingleEngineTrtRunner:
         for name, tensor in outputs.items():
             self.context.set_tensor_address(name, int(tensor.data_ptr()))
 
-        stream = torch.cuda.current_stream().cuda_stream
-        assert self.context.execute_async_v3(stream)
+        caller_stream = torch.cuda.current_stream()
+        self.stream.wait_stream(caller_stream)
+        assert self.context.execute_async_v3(self.stream.cuda_stream)
+        caller_stream.wait_stream(self.stream)
 
         return outputs
 
@@ -225,6 +228,10 @@ if __name__ == '__main__':
                         help='Generate and save point cloud')
     parser.add_argument('--zfar', type=float, default=100,
                         help='Max depth (m) to include in point cloud')
+    parser.add_argument('--no_display', action='store_true',
+                        help='Save outputs without opening GUI windows')
+    parser.add_argument('--benchmark_runs', type=int, default=0,
+                        help='Time this many warmed-up inference calls')
     args = parser.parse_args()
 
     set_logging_format()
@@ -286,6 +293,20 @@ if __name__ == '__main__':
     # ── Inference ─────────────────────────────────────────────────────────
     logging.info('Running inference (first run may be slow due to TRT warmup)')
     outputs = runner({'left_image': t_left, 'right_image': t_right})
+    if args.benchmark_runs > 0:
+        for _ in range(10):
+            runner({'left_image': t_left, 'right_image': t_right})
+        torch.cuda.synchronize()
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        for _ in range(args.benchmark_runs):
+            outputs = runner({'left_image': t_left, 'right_image': t_right})
+        end.record()
+        end.synchronize()
+        latency_ms = start.elapsed_time(end) / args.benchmark_runs
+        logging.info('TensorRT latency: %.2f ms (%.1f FPS, %d runs)',
+                     latency_ms, 1000.0 / latency_ms, args.benchmark_runs)
     disp = outputs['disparity']
     logging.info('Inference done')
 
@@ -297,8 +318,9 @@ if __name__ == '__main__':
     imageio.imwrite(f'{args.out_dir}/disp_vis.png', vis)
     s = 1280 / vis.shape[1]
     resized_vis = cv2.resize(vis, (int(vis.shape[1] * s), int(vis.shape[0] * s)))
-    cv2.imshow('disp', resized_vis[:, :, ::-1])
-    cv2.waitKey(0)
+    if not args.no_display:
+        cv2.imshow('disp', resized_vis[:, :, ::-1])
+        cv2.waitKey(0)
 
     # ── Remove invisible pixels ──────────────────────────────────────────
     if args.remove_invisible:
@@ -333,16 +355,17 @@ if __name__ == '__main__':
             pcd = pcd.select_by_index(ind)
             o3d.io.write_point_cloud(f'{args.out_dir}/cloud_denoise.ply', pcd)
 
-        logging.info('Visualizing point cloud. Press ESC to exit.')
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-        vis.add_geometry(pcd)
-        vis.get_render_option().point_size = 1.0
-        vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
-        ctr = vis.get_view_control()
-        ctr.set_front([0, 0, -1])
-        closest = np.asarray(pcd.points)[:, 2].argmin()
-        ctr.set_lookat(np.asarray(pcd.points)[closest])
-        ctr.set_up([0, -1, 0])
-        vis.run()
-        vis.destroy_window()
+        if not args.no_display:
+            logging.info('Visualizing point cloud. Press ESC to exit.')
+            vis = o3d.visualization.Visualizer()
+            vis.create_window()
+            vis.add_geometry(pcd)
+            vis.get_render_option().point_size = 1.0
+            vis.get_render_option().background_color = np.array([0.5, 0.5, 0.5])
+            ctr = vis.get_view_control()
+            ctr.set_front([0, 0, -1])
+            closest = np.asarray(pcd.points)[:, 2].argmin()
+            ctr.set_lookat(np.asarray(pcd.points)[closest])
+            ctr.set_up([0, -1, 0])
+            vis.run()
+            vis.destroy_window()

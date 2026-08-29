@@ -27,13 +27,50 @@ Stereo foundation models achieve strong zero-shot generalization but remain comp
 
 
 # Environment setup
-- Option 1: Docker
+- Option 1: Pixi (CUDA 12.8 / recent NVIDIA GPUs)
+```bash
+pixi install
+pixi run demo-help
+```
+
+After downloading a checkpoint into `weights/23-36-37/`, run the included demo with:
+```bash
+pixi run run-demo
+```
+
+For live ROS 2 Jazzy inference from a RealSense rectified IR pair, first launch
+the D435i streams (the hardware depth topic is enabled for camera profile
+stability but is not consumed):
+```bash
+export ROS_DOMAIN_ID=73
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+ros2 launch realsense2_camera rs_launch.py \
+  serial_no:=_348522073696 initial_reset:=true \
+  enable_infra1:=true enable_infra2:=true enable_depth:=true enable_color:=true \
+  enable_sync:=false depth_module.depth_profile:=640x480x30 \
+  depth_module.infra_profile:=640x480x30 rgb_camera.color_profile:=640x480x30
+```
+
+In a second terminal with the same ROS environment, start Fast-FoundationStereo:
+```bash
+export ROS_DOMAIN_ID=73
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+pixi run ros-depth
+```
+
+The node publishes metric `32FC1` depth on
+`/fast_foundation_stereo/depth/image_raw`, its calibration on
+`/fast_foundation_stereo/depth/camera_info`, and an RGB `PointCloud2` registered
+using the RealSense color calibration and TF on `/fast_foundation_stereo/points`.
+The point cloud is expressed in the left infrared optical frame.
+
+- Option 2: Docker
 ```bash
 docker build --network host -t ffs -f docker/dockerfile .
 bash docker/run_container.sh
 ```
 
-- Option 2: pip
+- Option 3: pip
 ```bash
 conda create -n ffs python=3.12 && conda activate ffs
 pip install torch==2.6.0 torchvision==0.21.0 xformers --index-url https://download.pytorch.org/whl/cu124
@@ -101,7 +138,24 @@ Expect to see results like below:
 
 
 # ONNX/TRT
-For TRT, we recommend first setup env in docker.
+
+The Docker-free Pixi environment includes TensorRT's Python builder and runtime:
+
+```bash
+pixi install -e trt
+pixi run -e trt trt-check
+pixi run -e trt trt-export
+pixi run -e trt trt-build
+pixi run -e trt trt-demo
+pixi run -e trt trt-benchmark
+```
+
+The export and engine are written to `output_single_trt/`. The supplied tasks
+build a fixed 640x480, 8-iteration FP16 engine from checkpoint `23-36-37`.
+Change the task arguments in `pixi.toml`, or invoke the scripts directly through
+`pixi run -e trt`, to use another resolution, iteration count, or checkpoint.
+TensorRT engines are specific to the GPU and TensorRT version, so rebuild the
+engine after changing either one.
 
 ## Single ONNX
 
@@ -123,7 +177,9 @@ python scripts/make_single_onnx.py --model_dir weights/23-36-37/model_best_bp2_s
 
 Then convert to a single TRT engine:
 ```bash
-trtexec --onnx=output/fast_foundationstereo.onnx --saveEngine=output/fast_foundationstereo.engine --fp16
+pixi run -e trt python scripts/build_single_trt.py \
+  --onnx output/fast_foundationstereo.onnx \
+  --engine output/fast_foundationstereo.engine --fp16
 ```
 
 To run inference with the single ONNX or TRT engine:
